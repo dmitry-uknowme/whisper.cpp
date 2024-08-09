@@ -148,6 +148,8 @@ bool read_wav(
         std::vector<std::vector<float>> & pcmf32s,
         bool stereo);
 
+bool read_wav_from_memory(const std::vector<uint8_t> &data, std::vector<float>& pcmf32, std::vector<std::vector<float>>& pcmf32s, bool stereo);
+
 // Write PCM data into WAV audio file
 class wav_writer {
 private:
