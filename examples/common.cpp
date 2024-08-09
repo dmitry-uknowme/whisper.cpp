@@ -25,9 +25,13 @@
 #endif
 
 #include <mutex>
+#include <memory>
+#include <atomic>
 
 std::mutex wav_file_mutex;
 std::mutex read_wav_mutex;
+std::atomic<int> active_readers(0);
+const int MAX_CONCURRENT_READERS = 8;
 
 #ifdef WHISPER_FFMPEG
 // as implemented in ffmpeg_trancode.cpp only embedded in common lib if whisper built with ffmpeg support
@@ -861,54 +865,130 @@ bool read_wav(const std::string &fname, std::vector<float>& pcmf32, std::vector<
     return true;
 }
 
-bool read_wav_from_memory(const std::vector<uint8_t>& data, std::vector<float>& pcmf32, std::vector<std::vector<float>>& pcmf32s, bool stereo) {
-    drwav wav;
+// bool read_wav_from_memory(const std::vector<uint8_t>& data, std::vector<float>& pcmf32, std::vector<std::vector<float>>& pcmf32s, bool stereo) {
+//     drwav wav;
     
-    std::lock_guard<std::mutex> lock(read_wav_mutex);
+//     std::lock_guard<std::mutex> lock(read_wav_mutex);
 
-    if (!drwav_init_memory(&wav, data.data(), data.size(), nullptr)) {
-        fprintf(stderr, "error: failed to open WAV data from memory\n");
-        return false;
+//     if (!drwav_init_memory(&wav, data.data(), data.size(), nullptr)) {
+//         fprintf(stderr, "error: failed to open WAV data from memory\n");
+//         return false;
+//     }
+
+//     // Проверка формата WAV
+//     if (wav.channels != 1 && wav.channels != 2) {
+//         fprintf(stderr, "error: WAV file must be mono or stereo\n");
+//         drwav_uninit(&wav);
+//         return false;
+//     }
+
+//     if (stereo && wav.channels != 2) {
+//         fprintf(stderr, "error: WAV file must be stereo for diarization\n");
+//         drwav_uninit(&wav);
+//         return false;
+//     }
+
+//     if (wav.sampleRate != COMMON_SAMPLE_RATE) {
+//         fprintf(stderr, "error: WAV file must be %i kHz\n", COMMON_SAMPLE_RATE / 1000);
+//         drwav_uninit(&wav);
+//         return false;
+//     }
+
+//     if (wav.bitsPerSample != 16) {
+//         fprintf(stderr, "error: WAV file must be 16-bit\n");
+//         drwav_uninit(&wav);
+//         return false;
+//     }
+
+//     // Чтение PCM данных
+//     const uint64_t n = wav.totalPCMFrameCount;
+//     std::vector<int16_t> pcm16(n * wav.channels);
+//     if (drwav_read_pcm_frames_s16(&wav, n, pcm16.data()) != n) {
+//         fprintf(stderr, "error: failed to read PCM frames\n");
+//         drwav_uninit(&wav);
+//         return false;
+//     }
+//     drwav_uninit(&wav);
+
+//     // Преобразование данных в формат float
+//     pcmf32.resize(n);
+//     if (wav.channels == 1) {
+//         for (uint64_t i = 0; i < n; i++) {
+//             pcmf32[i] = float(pcm16[i]) / 32768.0f;
+//         }
+//     } else {
+//         for (uint64_t i = 0; i < n; i++) {
+//             pcmf32[i] = float(pcm16[2 * i] + pcm16[2 * i + 1]) / 65536.0f;
+//         }
+//     }
+
+//     if (stereo) {
+//         pcmf32s.resize(2);
+//         pcmf32s[0].resize(n);
+//         pcmf32s[1].resize(n);
+//         for (uint64_t i = 0; i < n; i++) {
+//             pcmf32s[0][i] = float(pcm16[2 * i]) / 32768.0f;
+//             pcmf32s[1][i] = float(pcm16[2 * i + 1]) / 32768.0f;
+//         }
+//     }
+
+//     return true;
+// }
+
+bool read_wav_from_memory(const std::vector<uint8_t>& data, std::vector<float>& pcmf32, std::vector<std::vector<float>>& pcmf32s, bool stereo) {
+    // Ожидание, если достигнуто максимальное количество одновременных чтений
+    while (active_readers.load() >= MAX_CONCURRENT_READERS) {
+        fprintf(stderr, "error: Reached MAX_CONCURRENT_READERS");
+        std::this_thread::yield();
+    }
+
+    active_readers++;
+
+    std::unique_ptr<drwav, decltype(&drwav_uninit)> wav(new drwav, drwav_uninit);
+    
+    {
+        std::lock_guard<std::mutex> lock(read_wav_mutex);
+        if (!drwav_init_memory(wav.get(), data.data(), data.size(), nullptr)) {
+            fprintf(stderr, "error: failed to open WAV data from memory. Data size: %zu\n", data.size());
+            active_readers--;
+            return false;
+        }
     }
 
     // Проверка формата WAV
-    if (wav.channels != 1 && wav.channels != 2) {
+    if (wav->channels != 1 && wav->channels != 2) {
         fprintf(stderr, "error: WAV file must be mono or stereo\n");
-        drwav_uninit(&wav);
+        active_readers--;
         return false;
     }
-
-    if (stereo && wav.channels != 2) {
+    if (stereo && wav->channels != 2) {
         fprintf(stderr, "error: WAV file must be stereo for diarization\n");
-        drwav_uninit(&wav);
+        active_readers--;
         return false;
     }
-
-    if (wav.sampleRate != COMMON_SAMPLE_RATE) {
+    if (wav->sampleRate != COMMON_SAMPLE_RATE) {
         fprintf(stderr, "error: WAV file must be %i kHz\n", COMMON_SAMPLE_RATE / 1000);
-        drwav_uninit(&wav);
+        active_readers--;
         return false;
     }
-
-    if (wav.bitsPerSample != 16) {
+    if (wav->bitsPerSample != 16) {
         fprintf(stderr, "error: WAV file must be 16-bit\n");
-        drwav_uninit(&wav);
+        active_readers--;
         return false;
     }
 
     // Чтение PCM данных
-    const uint64_t n = wav.totalPCMFrameCount;
-    std::vector<int16_t> pcm16(n * wav.channels);
-    if (drwav_read_pcm_frames_s16(&wav, n, pcm16.data()) != n) {
+    const uint64_t n = wav->totalPCMFrameCount;
+    std::vector<int16_t> pcm16(n * wav->channels);
+    if (drwav_read_pcm_frames_s16(wav.get(), n, pcm16.data()) != n) {
         fprintf(stderr, "error: failed to read PCM frames\n");
-        drwav_uninit(&wav);
+        active_readers--;
         return false;
     }
-    drwav_uninit(&wav);
 
     // Преобразование данных в формат float
     pcmf32.resize(n);
-    if (wav.channels == 1) {
+    if (wav->channels == 1) {
         for (uint64_t i = 0; i < n; i++) {
             pcmf32[i] = float(pcm16[i]) / 32768.0f;
         }
@@ -928,9 +1008,9 @@ bool read_wav_from_memory(const std::vector<uint8_t>& data, std::vector<float>& 
         }
     }
 
+    active_readers--;
     return true;
 }
-
 
 void high_pass_filter(std::vector<float> & data, float cutoff, float sample_rate) {
     const float rc = 1.0f / (2.0f * M_PI * cutoff);
