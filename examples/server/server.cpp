@@ -670,6 +670,11 @@ int main(int argc, char ** argv) {
     
     std::vector<uint8_t> audio_data(audio_file.content.begin(), audio_file.content.end());
     fprintf(stderr, "Debug: Received audio data size: %zu bytes\n", audio_data.size());
+        
+    // check non-required fields
+    get_req_parameters(req, params);
+    std::string filename{audio_file.filename};
+    printf("Received request: %s\n", filename.c_str());
 
         // audio arrays
         std::vector<float> pcmf32;               // mono-channel F32 PCM
@@ -726,7 +731,7 @@ int main(int argc, char ** argv) {
         }
 
 
-        // printf("Successfully loaded %s\n", filename.c_str());
+        printf("Successfully loaded %s\n", filename.c_str());
 
         // print system information
         {
