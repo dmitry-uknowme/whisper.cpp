@@ -681,9 +681,10 @@ int main(int argc, char ** argv) {
             // Pseudorandom filenaming
             auto now = std::time(0);
             std::stringstream ss;
-            ss << now;
+            ss << now << "_" << std::this_thread::get_id();
             // const std::string temp_filename = "whisper_server_temp_file.wav";
             const std::string temp_filename = "whisper_server_temp_file_" + ss.str() + ".wav";
+            printf("Created temp file: %s\n", temp_filename.c_str());
             std::ofstream temp_file{temp_filename, std::ios::binary};
             temp_file << audio_file.content;
             temp_file.close();
