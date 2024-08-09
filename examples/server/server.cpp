@@ -708,14 +708,21 @@ int main(int argc, char ** argv) {
         //     // remove temp file
         //     std::remove(temp_filename.c_str());
         // } else {
-            if (!::read_wav(audio_file.content, pcmf32, pcmf32s, params.diarize))
-            {
-                fprintf(stderr, "error: failed to read WAV file\n");
-                const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
-                res.set_content(error_resp, "application/json");
-                return;
-            }
+            // if (!::read_wav(audio_file.content, pcmf32, pcmf32s, params.diarize))
+            // {
+            //     fprintf(stderr, "error: failed to read WAV file\n");
+            //     const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
+            //     res.set_content(error_resp, "application/json");
+            //     return;
+            // }
         // }
+
+        if (!read_wav_from_memory(audio_data, pcmf32, pcmf32s, params.diarize)) {
+            fprintf(stderr, "error: failed to read WAV file from memory\n");
+            const std::string error_resp = "{\"error\":\"failed to read WAV filee\"}";
+            res.set_content(error_resp, "application/json");
+            return;
+        }
 
 
         printf("Successfully loaded %s\n", filename.c_str());
