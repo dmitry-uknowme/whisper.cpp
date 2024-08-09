@@ -683,7 +683,7 @@ int main(int argc, char ** argv) {
             std::stringstream ss;
             ss << now;
             // const std::string temp_filename = "whisper_server_temp_file.wav";
-            onst std::string temp_filename = "whisper_server_temp_file_" + ss.str() + ".wav";
+            const std::string temp_filename = "whisper_server_temp_file_" + ss.str() + ".wav";
             std::ofstream temp_file{temp_filename, std::ios::binary};
             temp_file << audio_file.content;
             temp_file.close();
