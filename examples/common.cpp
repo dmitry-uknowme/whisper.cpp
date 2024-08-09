@@ -27,6 +27,7 @@
 #include <mutex>
 
 std::mutex wav_file_mutex;
+std::mutex read_wav_mutex;
 
 #ifdef WHISPER_FFMPEG
 // as implemented in ffmpeg_trancode.cpp only embedded in common lib if whisper built with ffmpeg support
@@ -860,15 +861,17 @@ bool read_wav(const std::string &fname, std::vector<float>& pcmf32, std::vector<
     return true;
 }
 
-bool read_wav_from_memory(const std::vector<uint8_t> &data, std::vector<float>& pcmf32, std::vector<std::vector<float>>& pcmf32s, bool stereo) {
+bool read_wav_from_memory(const std::vector<uint8_t>& data, std::vector<float>& pcmf32, std::vector<std::vector<float>>& pcmf32s, bool stereo) {
     drwav wav;
     
+    std::lock_guard<std::mutex> lock(read_wav_mutex);
+
     if (!drwav_init_memory(&wav, data.data(), data.size(), nullptr)) {
         fprintf(stderr, "error: failed to open WAV data from memory\n");
         return false;
     }
 
-    // Validate WAV format
+    // Проверка формата WAV
     if (wav.channels != 1 && wav.channels != 2) {
         fprintf(stderr, "error: WAV file must be mono or stereo\n");
         drwav_uninit(&wav);
@@ -882,7 +885,7 @@ bool read_wav_from_memory(const std::vector<uint8_t> &data, std::vector<float>& 
     }
 
     if (wav.sampleRate != COMMON_SAMPLE_RATE) {
-        fprintf(stderr, "error: WAV file must be %i kHz\n", COMMON_SAMPLE_RATE/1000);
+        fprintf(stderr, "error: WAV file must be %i kHz\n", COMMON_SAMPLE_RATE / 1000);
         drwav_uninit(&wav);
         return false;
     }
@@ -893,11 +896,17 @@ bool read_wav_from_memory(const std::vector<uint8_t> &data, std::vector<float>& 
         return false;
     }
 
+    // Чтение PCM данных
     const uint64_t n = wav.totalPCMFrameCount;
     std::vector<int16_t> pcm16(n * wav.channels);
-    drwav_read_pcm_frames_s16(&wav, n, pcm16.data());
+    if (drwav_read_pcm_frames_s16(&wav, n, pcm16.data()) != n) {
+        fprintf(stderr, "error: failed to read PCM frames\n");
+        drwav_uninit(&wav);
+        return false;
+    }
     drwav_uninit(&wav);
 
+    // Преобразование данных в формат float
     pcmf32.resize(n);
     if (wav.channels == 1) {
         for (uint64_t i = 0; i < n; i++) {
@@ -905,7 +914,7 @@ bool read_wav_from_memory(const std::vector<uint8_t> &data, std::vector<float>& 
         }
     } else {
         for (uint64_t i = 0; i < n; i++) {
-            pcmf32[i] = float(pcm16[2*i] + pcm16[2*i + 1]) / 65536.0f;
+            pcmf32[i] = float(pcm16[2 * i] + pcm16[2 * i + 1]) / 65536.0f;
         }
     }
 
@@ -914,8 +923,8 @@ bool read_wav_from_memory(const std::vector<uint8_t> &data, std::vector<float>& 
         pcmf32s[0].resize(n);
         pcmf32s[1].resize(n);
         for (uint64_t i = 0; i < n; i++) {
-            pcmf32s[0][i] = float(pcm16[2*i]) / 32768.0f;
-            pcmf32s[1][i] = float(pcm16[2*i + 1]) / 32768.0f;
+            pcmf32s[0][i] = float(pcm16[2 * i]) / 32768.0f;
+            pcmf32s[1][i] = float(pcm16[2 * i + 1]) / 32768.0f;
         }
     }
 
