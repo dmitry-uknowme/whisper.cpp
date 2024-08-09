@@ -674,41 +674,41 @@ int main(int argc, char ** argv) {
         std::vector<float> pcmf32;               // mono-channel F32 PCM
         std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
 
-        if (sparams.ffmpeg_converter) {
-            // if file is not wav, convert to wav
-            // write to temporary file
-            const std::string temp_filename = "whisper_server_temp_file.wav";
-            std::ofstream temp_file{temp_filename, std::ios::binary};
-            temp_file << audio_file.content;
-            temp_file.close();
+        // if (sparams.ffmpeg_converter) {
+        //     // if file is not wav, convert to wav
+        //     // write to temporary file
+        //     const std::string temp_filename = "whisper_server_temp_file.wav";
+        //     std::ofstream temp_file{temp_filename, std::ios::binary};
+        //     temp_file << audio_file.content;
+        //     temp_file.close();
 
-            std::string error_resp = "{\"error\":\"Failed to execute ffmpeg command.\"}";
-            const bool is_converted = convert_to_wav(temp_filename, error_resp);
-            if (!is_converted) {
-                res.set_content(error_resp, "application/json");
-                return;
-            }
+        //     std::string error_resp = "{\"error\":\"Failed to execute ffmpeg command.\"}";
+        //     const bool is_converted = convert_to_wav(temp_filename, error_resp);
+        //     if (!is_converted) {
+        //         res.set_content(error_resp, "application/json");
+        //         return;
+        //     }
 
-            // read wav content into pcmf32
-            if (!::read_wav(temp_filename, pcmf32, pcmf32s, params.diarize))
-            {
-                fprintf(stderr, "error: failed to read WAV file '%s'\n", temp_filename.c_str());
-                const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
-                res.set_content(error_resp, "application/json");
-                std::remove(temp_filename.c_str());
-                return;
-            }
-            // remove temp file
-            std::remove(temp_filename.c_str());
-        } else {
-            if (!::read_wav(audio_file.content, pcmf32, pcmf32s, params.diarize))
-            {
-                fprintf(stderr, "error: failed to read WAV file\n");
-                const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
-                res.set_content(error_resp, "application/json");
-                return;
-            }
-        }
+        //     // read wav content into pcmf32
+        //     if (!::read_wav(temp_filename, pcmf32, pcmf32s, params.diarize))
+        //     {
+        //         fprintf(stderr, "error: failed to read WAV file '%s'\n", temp_filename.c_str());
+        //         const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
+        //         res.set_content(error_resp, "application/json");
+        //         std::remove(temp_filename.c_str());
+        //         return;
+        //     }
+        //     // remove temp file
+        //     std::remove(temp_filename.c_str());
+        // } else {
+        //     if (!::read_wav(audio_file.content, pcmf32, pcmf32s, params.diarize))
+        //     {
+        //         fprintf(stderr, "error: failed to read WAV file\n");
+        //         const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
+        //         res.set_content(error_resp, "application/json");
+        //         return;
+        //     }
+        // }
 
 
         printf("Successfully loaded %s\n", filename.c_str());
