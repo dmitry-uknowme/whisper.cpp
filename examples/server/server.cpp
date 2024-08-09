@@ -663,6 +663,7 @@ int main(int argc, char ** argv) {
             return;
         }
         auto audio_file = req.get_file_value("file");
+        std::vector<uint8_t> audio_data(audio_file.content.begin(), audio_file.content.end());
 
         // check non-required fields
         get_req_parameters(req, params);
