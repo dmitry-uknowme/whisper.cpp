@@ -659,31 +659,33 @@ int main(int argc, char ** argv) {
         // acquire whisper model mutex lock
         std::lock_guard<std::mutex> lock(whisper_mutex);
 
+        std::thread worker([req = req, &res, this]() {
+
         fprintf(stderr, "Debug: Request started. Thread ID: %lu\n", std::this_thread::get_id());
         fprintf(stderr, "Debug: File field exists: %d\n", req.has_file("file"));
         fprintf(stderr, "Debug: File content size: %zu\n", req.get_file_value("file").content.size());
 
         // first check user requested fields of the request
-    if (!req.has_file("file")) {
-        fprintf(stderr, "error: no 'file' field in the request\n");
-        res.set_content("{\"error\":\"no 'file' field in the request\"}", "application/json");
-        return;
-    }
-    
-    auto audio_file = req.get_file_value("file");
-    if (audio_file.content.empty()) {
-        fprintf(stderr, "error: uploaded file is empty\n");
-        res.set_content("{\"error\":\"uploaded file is empty\"}", "application/json");
-        return;
-    }
-    
-    std::vector<uint8_t> audio_data(audio_file.content.begin(), audio_file.content.end());
-    fprintf(stderr, "Debug: Received audio data size: %zu bytes\n", audio_data.size());
+        if (!req.has_file("file")) {
+            fprintf(stderr, "error: no 'file' field in the request\n");
+            res.set_content("{\"error\":\"no 'file' field in the request\"}", "application/json");
+            return;
+        }
         
-    // check non-required fields
-    get_req_parameters(req, params);
-    std::string filename{audio_file.filename};
-    printf("Received request: %s\n", filename.c_str());
+        auto audio_file = req.get_file_value("file");
+        if (audio_file.content.empty()) {
+            fprintf(stderr, "error: uploaded file is empty\n");
+            res.set_content("{\"error\":\"uploaded file is empty\"}", "application/json");
+            return;
+        }
+        
+        std::vector<uint8_t> audio_data(audio_file.content.begin(), audio_file.content.end());
+        fprintf(stderr, "Debug: Received audio data size: %zu bytes\n", audio_data.size());
+            
+        // check non-required fields
+        get_req_parameters(req, params);
+        std::string filename{audio_file.filename};
+        printf("Received request: %s\n", filename.c_str());
 
         // audio arrays
         std::vector<float> pcmf32;               // mono-channel F32 PCM
@@ -974,7 +976,9 @@ int main(int argc, char ** argv) {
             res.set_content(jres.dump(-1, ' ', false, json::error_handler_t::replace),
                             "application/json");
         }
-
+            
+        }
+        worker.detach();
         // reset params to their defaults
         params = default_params;
     });
