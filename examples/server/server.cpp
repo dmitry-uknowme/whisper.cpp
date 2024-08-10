@@ -1028,7 +1028,6 @@ svr.Post(sparams.request_path + sparams.inference_path, [this, &params, &default
     // Создаем копию params для использования в потоке
     auto thread_params = params;
     auto thread_ctx = ctx;
-
     std::thread worker([this, &res, req, thread_params, thread_ctx]() mutable {
         fprintf(stderr, "Debug: Request started. Thread ID: %s\n", std::to_string(std::this_thread::get_id()).c_str());
         fprintf(stderr, "Debug: File field exists: %d\n", req.has_file("file"));
