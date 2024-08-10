@@ -977,7 +977,7 @@ int main(int argc, char ** argv) {
                             "application/json");
         }
             
-        }
+        })
         worker.detach();
         // reset params to their defaults
         params = default_params;
