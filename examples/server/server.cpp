@@ -566,7 +566,12 @@ int main(int argc, char ** argv) {
     svr.set_default_headers({{"Server", "whisper.cpp"},
                              {"Access-Control-Allow-Origin", "*"},
                              {"Access-Control-Allow-Headers", "content-type, authorization"}});
-
+    
+    svr.set_payload_max_length(20 * 1024 * 1024); // 20 MB
+    svr.set_keep_alive_max_count(100);
+    svr.set_read_timeout(5, 0); // 5 seconds
+    svr.set_write_timeout(5, 0); // 5 seconds
+    
     std::string const default_content = R"(
     <html>
     <head>
@@ -653,6 +658,10 @@ int main(int argc, char ** argv) {
     svr.Post(sparams.request_path + sparams.inference_path, [&](const Request &req, Response &res){
         // acquire whisper model mutex lock
         std::lock_guard<std::mutex> lock(whisper_mutex);
+
+        fprintf(stderr, "Debug: Request started. Thread ID: %lu\n", std::this_thread::get_id());
+        fprintf(stderr, "Debug: File field exists: %d\n", req.has_file("file"));
+        fprintf(stderr, "Debug: File content size: %zu\n", req.get_file_value("file").content.size());
 
         // first check user requested fields of the request
     if (!req.has_file("file")) {
