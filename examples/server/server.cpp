@@ -1021,116 +1021,126 @@ int main(int argc, char ** argv) {
     //     // check if the model is in the file system
     // });
 
-    svr.Post(sparams.request_path + sparams.inference_path, [&](const Request &req, Response &res) {
-        // acquire whisper model mutex lock
-        std::lock_guard<std::mutex> lock(whisper_mutex);
-    
-        // Создаем копию params для использования в потоке
-        auto thread_params = params;
-    
-        std::thread worker([req = req, &res, this, thread_params = std::move(thread_params), ctx = ctx]() mutable {
-            fprintf(stderr, "Debug: Request started. Thread ID: %lu\n", std::this_thread::get_id());
-            fprintf(stderr, "Debug: File field exists: %d\n", req.has_file("file"));
-            fprintf(stderr, "Debug: File content size: %zu\n", req.get_file_value("file").content.size());
-    
-            // first check user requested fields of the request
-            if (!req.has_file("file")) {
-                fprintf(stderr, "error: no 'file' field in the request\n");
-                res.set_content("{\"error\":\"no 'file' field in the request\"}", "application/json");
-                return;
-            }
+svr.Post(sparams.request_path + sparams.inference_path, [this, &params, &default_params](const Request &req, Response &res) {
+    // acquire whisper model mutex lock
+    std::lock_guard<std::mutex> lock(whisper_mutex);
+
+    // Создаем копию params для использования в потоке
+    auto thread_params = params;
+    auto thread_ctx = ctx;
+
+    std::thread worker([this, &res, req, thread_params, thread_ctx]() mutable {
+        fprintf(stderr, "Debug: Request started. Thread ID: %s\n", std::to_string(std::this_thread::get_id()).c_str());
+        fprintf(stderr, "Debug: File field exists: %d\n", req.has_file("file"));
+        fprintf(stderr, "Debug: File content size: %zu\n", req.get_file_value("file").content.size());
+
+        // first check user requested fields of the request
+        if (!req.has_file("file")) {
+            fprintf(stderr, "error: no 'file' field in the request\n");
+            res.set_content("{\"error\":\"no 'file' field in the request\"}", "application/json");
+            return;
+        }
+        
+        auto audio_file = req.get_file_value("file");
+        if (audio_file.content.empty()) {
+            fprintf(stderr, "error: uploaded file is empty\n");
+            res.set_content("{\"error\":\"uploaded file is empty\"}", "application/json");
+            return;
+        }
+        
+        std::vector<uint8_t> audio_data(audio_file.content.begin(), audio_file.content.end());
+        fprintf(stderr, "Debug: Received audio data size: %zu bytes\n", audio_data.size());
             
-            auto audio_file = req.get_file_value("file");
-            if (audio_file.content.empty()) {
-                fprintf(stderr, "error: uploaded file is empty\n");
-                res.set_content("{\"error\":\"uploaded file is empty\"}", "application/json");
-                return;
-            }
-            
-            std::vector<uint8_t> audio_data(audio_file.content.begin(), audio_file.content.end());
-            fprintf(stderr, "Debug: Received audio data size: %zu bytes\n", audio_data.size());
-                
-            // check non-required fields
-            get_req_parameters(req, thread_params);
-            std::string filename{audio_file.filename};
-            printf("Received request: %s\n", filename.c_str());
-    
-            // audio arrays
-            std::vector<float> pcmf32;               // mono-channel F32 PCM
-            std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
-    
-            if (!read_wav_from_memory(audio_data, pcmf32, pcmf32s, thread_params.diarize)) {
-                fprintf(stderr, "error: failed to read WAV file from memory\n");
-                const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
-                res.set_content(error_resp, "application/json");
-                return;
-            }
-    
-            // ... (остальной код остается без изменений)
-    
-            // return results to user
-            if (thread_params.response_format == text_format)
+        // check non-required fields
+        get_req_parameters(req, thread_params);
+        std::string filename{audio_file.filename};
+        printf("Received request: %s\n", filename.c_str());
+
+        // audio arrays
+        std::vector<float> pcmf32;               // mono-channel F32 PCM
+        std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
+
+        if (!read_wav_from_memory(audio_data, pcmf32, pcmf32s, thread_params.diarize)) {
+            fprintf(stderr, "error: failed to read WAV file from memory\n");
+            const std::string error_resp = "{\"error\":\"failed to read WAV file\"}";
+            res.set_content(error_resp, "application/json");
+            return;
+        }
+
+        // ... (остальной код остается без изменений)
+
+        // return results to user
+        if (thread_params.response_format == text_format)
+        {
+            std::string results = output_str(thread_ctx, thread_params, pcmf32s);
+            res.set_content(results.c_str(), "text/html; charset=utf-8");
+        }
+        else if (thread_params.response_format == srt_format)
+        {
+            // ... (код для srt_format остается без изменений)
+        }
+        else if (thread_params.response_format == vtt_format)
+        {
+            // ... (код для vtt_format остается без изменений)
+        }
+        else if (thread_params.response_format == vjson_format)
+        {
+            std::string results = output_str(thread_ctx, thread_params, pcmf32s);
+            json jres = json{
+                {"task", thread_params.translate ? "translate" : "transcribe"},
+                {"language", whisper_lang_str_full(whisper_full_lang_id(thread_ctx))},
+                {"duration", float(pcmf32.size()) / WHISPER_SAMPLE_RATE},
+                {"text", results},
+                {"segments", json::array()}
+            };
+
+            const int n_segments = whisper_full_n_segments(thread_ctx);
+            for (int i = 0; i < n_segments; ++i)
             {
-                std::string results = output_str(ctx, thread_params, pcmf32s);
-                res.set_content(results.c_str(), "text/html; charset=utf-8");
-            }
-            else if (thread_params.response_format == srt_format)
-            {
-                // ... (код для srt_format остается без изменений)
-            }
-            else if (thread_params.response_format == vtt_format)
-            {
-                // ... (код для vtt_format остается без изменений)
-            }
-            else if (thread_params.response_format == vjson_format)
-            {
-                std::string results = output_str(ctx, thread_params, pcmf32s);
-                json jres = json{
-                    {"task", thread_params.translate ? "translate" : "transcribe"},
-                    {"language", whisper_lang_str_full(whisper_full_lang_id(ctx))},
-                    {"duration", float(pcmf32.size()) / WHISPER_SAMPLE_RATE},
-                    {"text", results},
-                    {"segments", json::array()}
+                json segment = json{
+                    {"id", i},
+                    {"text", whisper_full_get_segment_text(thread_ctx, i)}
                 };
-    
-                const int n_segments = whisper_full_n_segments(ctx);
-                for (int i = 0; i < n_segments; ++i)
-                {
-                    json segment = json{
-                        {"id", i},
-                        {"text", whisper_full_get_segment_text(ctx, i)}
-                    };
-    
-                    if (!thread_params.no_timestamps) {
-                        segment["start"] = whisper_full_get_segment_t0(ctx, i) * 0.01;
-                        segment["end"] = whisper_full_get_segment_t1(ctx, i) * 0.01;
-                    }
-    
-                    // ... (остальной код для сегментов остается без изменений)
-    
-                    segment["temperature"] = thread_params.temperature;
-                    segment["avg_logprob"] = total_logprob / n_tokens;
-    
-                    jres["segments"].push_back(segment);
+
+                if (!thread_params.no_timestamps) {
+                    segment["start"] = whisper_full_get_segment_t0(thread_ctx, i) * 0.01;
+                    segment["end"] = whisper_full_get_segment_t1(thread_ctx, i) * 0.01;
                 }
-                res.set_content(jres.dump(-1, ' ', false, json::error_handler_t::replace),
-                                "application/json");
+
+                float total_logprob = 0;
+                int n_tokens = whisper_full_n_tokens(thread_ctx, i);
+                for (int j = 0; j < n_tokens; ++j) {
+                    whisper_token_data token = whisper_full_get_token_data(thread_ctx, i, j);
+                    if (token.id >= whisper_token_eot(thread_ctx)) {
+                        continue;
+                    }
+                    total_logprob += token.plog;
+                    // ... (остальной код для токенов)
+                }
+
+                segment["temperature"] = thread_params.temperature;
+                segment["avg_logprob"] = n_tokens > 0 ? total_logprob / n_tokens : 0;
+
+                jres["segments"].push_back(segment);
             }
-            else
-            {
-                std::string results = output_str(ctx, thread_params, pcmf32s);
-                json jres = json{
-                    {"text", results}
-                };
-                res.set_content(jres.dump(-1, ' ', false, json::error_handler_t::replace),
-                                "application/json");
-            }
-        });
-    
-        worker.detach();
-        // reset params to their defaults
-        params = default_params;
+            res.set_content(jres.dump(-1, ' ', false, json::error_handler_t::replace),
+                            "application/json");
+        }
+        else
+        {
+            std::string results = output_str(thread_ctx, thread_params, pcmf32s);
+            json jres = json{
+                {"text", results}
+            };
+            res.set_content(jres.dump(-1, ' ', false, json::error_handler_t::replace),
+                            "application/json");
+        }
     });
+
+    worker.detach();
+    // reset params to their defaults
+    params = default_params;
+});
 
     svr.set_exception_handler([](const Request &, Response &res, std::exception_ptr ep) {
         const char fmt[] = "500 Internal Server Error\n%s";
