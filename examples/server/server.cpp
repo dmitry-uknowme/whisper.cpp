@@ -12,6 +12,8 @@
 #include <vector>
 #include <cstring>
 #include <sstream>
+#include <shared_mutex>
+#include <queue>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -479,6 +481,14 @@ void get_req_parameters(const Request & req, whisper_params & params)
 int main(int argc, char ** argv) {
     whisper_params params;
     server_params sparams;
+
+    std::mutex file_mutex;
+    std::queue<std::vector<uint8_t>> file_queue;
+    std::mutex queue_mutex;
+    std::condition_variable queue_cv;
+    const int MAX_QUEUE_SIZE = 10;
+    std::atomic<bool> results_ready{false};  // Флаг для проверки готовности результатов
+    std::string result_content;  // Хранение результатов для отправки
 
     std::mutex whisper_mutex;
 
@@ -1021,15 +1031,21 @@ int main(int argc, char ** argv) {
     //     // check if the model is in the file system
     // });
 
-svr.Post(sparams.request_path + sparams.inference_path, [this, &params, &default_params](const Request &req, Response &res) {
+
+
+svr.Post(sparams.request_path + sparams.inference_path, [&](const Request &req, Response &res) {
     // acquire whisper model mutex lock
     std::lock_guard<std::mutex> lock(whisper_mutex);
 
     // Создаем копию params для использования в потоке
     auto thread_params = params;
     auto thread_ctx = ctx;
-    std::thread worker([this, &res, req, thread_params, thread_ctx = thread_ctx]() mutable {
-        fprintf(stderr, "Debug: Request started. Thread ID: %s\n", std::to_string(std::this_thread::get_id()).c_str());
+
+    std::thread worker([&res, req, thread_params = std::move(thread_params), 
+                        thread_ctx = std::move(thread_ctx)]() mutable {
+        std::stringstream ss;
+        ss << std::this_thread::get_id();
+        fprintf(stderr, "Debug: Request started. Thread ID: %s\n", ss.str().c_str());
         fprintf(stderr, "Debug: File field exists: %d\n", req.has_file("file"));
         fprintf(stderr, "Debug: File content size: %zu\n", req.get_file_value("file").content.size());
 
@@ -1085,21 +1101,32 @@ svr.Post(sparams.request_path + sparams.inference_path, [this, &params, &default
         else if (thread_params.response_format == vjson_format)
         {
             std::string results = output_str(thread_ctx, thread_params, pcmf32s);
-            json jres = json{
-                {"task", thread_params.translate ? "translate" : "transcribe"},
-                {"language", whisper_lang_str_full(whisper_full_lang_id(thread_ctx))},
-                {"duration", float(pcmf32.size()) / WHISPER_SAMPLE_RATE},
-                {"text", results},
-                {"segments", json::array()}
-            };
+            // json jres = json{
+            //     {"task", thread_params.translate ? "translate" : "transcribe"},
+            //     {"language", whisper_lang_str_full(whisper_full_lang_id(thread_ctx))},
+            //     {"duration", float(pcmf32.size()) / WHISPER_SAMPLE_RATE},
+            //     {"text", results},
+            //     {"segments", json::array()}
+            // };
+
+            json jres;
+            jres["task"] = thread_params.translate ? "translate" : "transcribe";
+            jres["language"] = whisper_lang_str_full(whisper_full_lang_id(thread_ctx));
+            jres["duration"] = float(pcmf32.size()) / WHISPER_SAMPLE_RATE;
+            jres["text"] = results;
+            jres["segments"] = json::array();
 
             const int n_segments = whisper_full_n_segments(thread_ctx);
             for (int i = 0; i < n_segments; ++i)
             {
-                json segment = json{
-                    {"id", i},
-                    {"text", whisper_full_get_segment_text(thread_ctx, i)}
-                };
+                // json segment = json{
+                //     {"id", i},
+                //     {"text", whisper_full_get_segment_text(thread_ctx, i)}
+                // };
+
+                json segment;
+                segment["id"] = i;
+                segment["text"] = whisper_full_get_segment_text(thread_ctx, i);
 
                 if (!thread_params.no_timestamps) {
                     segment["start"] = whisper_full_get_segment_t0(thread_ctx, i) * 0.01;
@@ -1140,6 +1167,10 @@ svr.Post(sparams.request_path + sparams.inference_path, [this, &params, &default
     // reset params to their defaults
     params = default_params;
 });
+
+
+
+
 
     svr.set_exception_handler([](const Request &, Response &res, std::exception_ptr ep) {
         const char fmt[] = "500 Internal Server Error\n%s";
