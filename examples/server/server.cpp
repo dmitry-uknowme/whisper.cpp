@@ -1034,15 +1034,12 @@ int main(int argc, char ** argv) {
 
 
 svr.Post(sparams.request_path + sparams.inference_path, [&](const Request &req, Response &res) {
-    // acquire whisper model mutex lock
     std::lock_guard<std::mutex> lock(whisper_mutex);
 
-    // Создаем копию params для использования в потоке
-    auto thread_params = params;
-    auto thread_ctx = ctx;
+    auto thread_params = params;  // убрали std::move
+    auto thread_ctx = ctx;  // убрали std::move
 
-    std::thread worker([&res, req, thread_params = std::move(thread_params), 
-                        thread_ctx = std::move(thread_ctx)]() mutable {
+    std::thread worker([&res, req, thread_params, thread_ctx]() mutable {  // убрали std::move
         std::stringstream ss;
         ss << std::this_thread::get_id();
         fprintf(stderr, "Debug: Request started. Thread ID: %s\n", ss.str().c_str());
