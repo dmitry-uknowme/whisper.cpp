@@ -1214,6 +1214,7 @@ int main(int argc, char **argv)
 
     svr.Post(sparams.request_path + sparams.inference_path, [&](const Request &req, Response &res)
              {
+    // Проверка на наличие файла до создания потока
     if (!req.has_file("file")) {
         fprintf(stderr, "error: no 'file' field in the request\n");
         res.set_content("{\"error\":\"no 'file' field in the request\"}", "application/json");
@@ -1229,19 +1230,17 @@ int main(int argc, char **argv)
 
     std::vector<uint8_t> audio_data(audio_file.content.begin(), audio_file.content.end());
 
-    // Capture whisper_mutex, ctx, and params in the lambda
-    std::thread worker([&res, req, audio_data, &whisper_mutex, ctx, params]() mutable {
+    // Локальные копии params и ctx для каждого потока
+    std::thread worker([&res, req = Request(req), audio_data = std::move(audio_data), 
+                        thread_params = params, thread_ctx = ctx, &whisper_mutex]() mutable 
+    {
         std::stringstream ss;
         ss << std::this_thread::get_id();
         fprintf(stderr, "Debug: Request started. Thread ID: %s\n", ss.str().c_str());
 
-        // Thread-specific copies of params and ctx
-        auto thread_params = params;  // Make a local copy of params
-        auto thread_ctx = ctx;        // Make a local copy of ctx
+        std::lock_guard<std::mutex> lock(whisper_mutex);  // Защита общих ресурсов
 
-        std::lock_guard<std::mutex> lock(whisper_mutex);  // Protect shared resources
-
-        // Process audio data as usual
+        // Процессинг данных
         std::vector<float> pcmf32;
         std::vector<std::vector<float>> pcmf32s;
 
